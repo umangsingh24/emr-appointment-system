@@ -3,6 +3,7 @@
  * Usage: npm run seed
  * Re-running is safe: existing records (matched by email / code) are left untouched.
  */
+import mongoose from 'mongoose';
 import { ROLES } from '../config/constants.js';
 import { connectDatabase, disconnectDatabase } from '../config/db.js';
 import { env } from '../config/env.js';
@@ -66,7 +67,8 @@ const patients = [
 
 async function seed() {
   await connectDatabase();
-  await Promise.all([User, Department, DoctorSchedule, Patient].map((model) => model.syncIndexes()));
+  // Build every declared index (incl. the double-booking guard): autoIndex is off in production.
+  await Promise.all(Object.values(mongoose.models).map((model) => model.syncIndexes()));
 
   const departmentIds = {};
   for (const dept of departments) {
