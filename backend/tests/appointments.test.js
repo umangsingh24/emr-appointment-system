@@ -162,3 +162,22 @@ describe('Listing', () => {
     expect(cancelledOnly.body.meta.total).toBe(0);
   });
 });
+
+describe('Dashboard stats', () => {
+  it('counts the day by status and department, scoped for doctors', async () => {
+    const { doctor: otherDoctor } = await createDoctorWithSchedule({ name: 'Dr. Other' });
+    const first = await book({ newPatient: newPatient() });
+    await book({ newPatient: newPatient('Bina Rao', '9000000001'), slotStart: '09:15' });
+    await book({ newPatient: newPatient('Chetan Das', '9000000002'), doctorId: String(otherDoctor._id) });
+    await api().delete(`/api/v1/appointments/${first.body.data._id}`).set(bearer(receptionToken)).send({});
+
+    const all = await api().get('/api/v1/appointments/stats').query({ date: tomorrow() }).set(bearer(receptionToken));
+    expect(all.status).toBe(200);
+    expect(all.body.data).toMatchObject({ total: 3, byStatus: { SCHEDULED: 2, CANCELLED: 1, ARRIVED: 0, COMPLETED: 0 } });
+    expect(all.body.data.byDepartment).toEqual([expect.objectContaining({ name: 'General Medicine', count: 2 })]);
+
+    const { token } = await loginAs(doctor);
+    const mine = await api().get('/api/v1/appointments/stats').query({ date: tomorrow() }).set(bearer(token));
+    expect(mine.body.data).toMatchObject({ total: 2, byStatus: { SCHEDULED: 1, CANCELLED: 1 } });
+  });
+});

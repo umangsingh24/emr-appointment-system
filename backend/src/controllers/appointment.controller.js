@@ -46,3 +46,8 @@ export async function markCompleted(req, res) {
   const appointment = await appointmentService.markCompleted(req.validated.params.id, req.user, requestContext(req));
   return sendSuccess(res, { message: 'Appointment marked as completed', data: appointment });
 }
+
+export async function getDayStats(req, res) {
+  const stats = await appointmentService.getDayStats(req.validated.query, req.user);
+  return sendSuccess(res, { data: stats });
+}

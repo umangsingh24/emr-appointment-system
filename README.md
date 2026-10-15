@@ -232,6 +232,7 @@ Base URL `http://localhost:5000/api/v1`. Every response uses the same envelope:
 | POST / GET | `/patients`, `/patients/:id` | SA, RC | Register / view a patient. |
 | POST | `/appointments` | SA, RC | Book (existing or new patient). |
 | GET | `/appointments` | all | Search, filter, sort, paginate. Doctors see only their own. |
+| GET | `/appointments/stats` | all | Dashboard counts for a day, by status and by department. |
 | GET | `/appointments/:id` | all | Appointment details with patient information. |
 | PUT | `/appointments/:id` | SA, RC, DR | Update purpose/notes (front desk) or consultation notes (doctor). |
 | DELETE | `/appointments/:id` | SA, RC | Cancel (soft delete; frees the slot). |
@@ -439,7 +440,6 @@ first run downloads a MongoDB binary (~100 MB).
 - Reschedule endpoint that atomically moves an appointment to a new slot.
 - Schedule exceptions (leave, holidays, ad-hoc sessions) and per-date overrides.
 - Audit log viewer for Super Admin, and a retention policy for audit data.
-- Dashboard statistics endpoint (today's appointments by status and by department).
 - User management: deactivate, reset password, edit profile; account lockout after repeated
   failures.
 - Redis adapter for Socket.IO and a Redis-backed rate limiter for horizontal scaling.

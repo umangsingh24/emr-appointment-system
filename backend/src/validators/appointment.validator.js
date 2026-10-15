@@ -63,3 +63,7 @@ export const cancelAppointmentSchema = {
 };
 
 export const appointmentIdSchema = { params: idParams };
+
+export const statsSchema = {
+  query: z.object({ date: dateString.optional() }),
+};

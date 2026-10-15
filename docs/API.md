@@ -448,6 +448,30 @@ Example: `GET /appointments?departmentId=...&status=SCHEDULED,ARRIVED&dateFrom=2
 }
 ```
 
+### `GET /appointments/stats?date=`
+
+All roles; doctors count only their own appointments. `date` defaults to today in the clinic
+timezone. Computed with a single aggregation.
+
+```json
+{
+  "success": true,
+  "message": "OK",
+  "data": {
+    "date": "2026-10-19",
+    "total": 14,
+    "byStatus": { "SCHEDULED": 9, "ARRIVED": 2, "COMPLETED": 2, "CANCELLED": 1 },
+    "byDepartment": [
+      { "departmentId": "6711e000a1b2c3d4e5f60001", "name": "General Medicine", "count": 8 },
+      { "departmentId": "6711e000a1b2c3d4e5f60009", "name": "Cardiology", "count": 5 }
+    ]
+  },
+  "meta": {}
+}
+```
+
+`byDepartment` excludes cancelled appointments.
+
 ### `GET /appointments/:id`
 
 All roles. Includes the populated `patient` (code, name, mobile, email, gender, date of

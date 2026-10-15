@@ -8,6 +8,7 @@ import {
   cancelAppointmentSchema,
   createAppointmentSchema,
   listAppointmentsSchema,
+  statsSchema,
   updateAppointmentSchema,
 } from '../validators/appointment.validator.js';
 
@@ -16,6 +17,7 @@ const router = Router();
 
 // Read access for all roles; doctors are restricted to their own records in the service layer.
 router.get('/', validate(listAppointmentsSchema), appointmentController.listAppointments);
+router.get('/stats', validate(statsSchema), appointmentController.getDayStats); // before /:id
 router.get('/:id', validate(appointmentIdSchema), appointmentController.getAppointment);
 
 router.post('/', authorize(SUPER_ADMIN, RECEPTIONIST), validate(createAppointmentSchema), appointmentController.createAppointment);

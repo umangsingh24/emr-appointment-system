@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import {
   APPOINTMENT_STATUS,
   AUDIT_ACTIONS,
@@ -319,4 +320,36 @@ export async function listAppointments(query, actor) {
   ]);
 
   return { items: items.map(present), meta: paginationMeta(pagination, total) };
+}
+
+/**
+ * Dashboard counters for one day, in a single aggregation: totals by status and by department.
+ * Scoped like every other query, so a doctor only counts their own appointments.
+ */
+export async function getDayStats({ date = clinicNow().date }, actor) {
+  const match = { date };
+  // Aggregation pipelines bypass Mongoose casting, so the doctor id must be an ObjectId here.
+  if (actor.role === ROLES.DOCTOR) match.doctor = new mongoose.Types.ObjectId(actor.id);
+
+  const [result] = await Appointment.aggregate([
+    { $match: match },
+    {
+      $facet: {
+        byStatus: [{ $group: { _id: '$status', count: { $sum: 1 } } }],
+        byDepartment: [
+          { $match: { status: { $ne: CANCELLED } } },
+          { $group: { _id: '$department', count: { $sum: 1 } } },
+          { $lookup: { from: 'departments', localField: '_id', foreignField: '_id', as: 'department' } },
+          { $project: { _id: 0, departmentId: '$_id', name: { $first: '$department.name' }, count: 1 } },
+          { $sort: { count: -1 } },
+        ],
+      },
+    },
+  ]);
+
+  const byStatus = Object.fromEntries(Object.values(APPOINTMENT_STATUS).map((status) => [status, 0]));
+  for (const { _id, count } of result.byStatus) byStatus[_id] = count;
+  const total = Object.values(byStatus).reduce((sum, count) => sum + count, 0);
+
+  return { date, total, byStatus, byDepartment: result.byDepartment };
 }
