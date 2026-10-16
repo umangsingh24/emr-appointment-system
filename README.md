@@ -7,9 +7,8 @@ Front-desk staff book patients into doctors' time slots, admins configure each d
 working hours, and doctors see their own day. Every change is pushed live to everyone viewing
 the same schedule.
 
-> **Status:** the backend API is complete, tested and documented. The React frontend is in
-> progress; the frontend sections below describe the planned design and will be updated as
-> it lands.
+> **Status:** backend and frontend are complete. The backend has an automated test suite; the
+> frontend was verified manually end to end for all three roles (see [Testing](#testing)).
 
 | Document | Contents |
 |---|---|
@@ -136,11 +135,29 @@ no matter how many API instances run. See
 3. The payload has IDs, date, time and status only. Clients refetch through the REST API, so
    permission checks always apply and no patient data travels over the broadcast channel.
 
-**Frontend (planned):**
-- **Stack:** React with Vite, React Router, TanStack Query for server state, Context for the
-  auth session, and React Hook Form with Zod.
-- **Live updates:** Socket.IO events mark the affected cached queries as stale, so screens
-  update without a refresh.
+**Frontend.**
+- **Stack:** React 19 with Vite, React Router, Tailwind CSS, and DayPicker for the calendar.
+- **State:**
+  - **TanStack Query** holds all server data: caching, de-duplicated requests, loading and
+    error states, and retries.
+  - React Context holds only the login session.
+  - Filters and pagination live in the URL.
+- **Forms:** React Hook Form with Zod 4, the same validation library as the API, with the same
+  rules re-declared on the client. Server validation errors are mapped back onto the matching
+  fields.
+- **Session:**
+  - The access token is kept in memory only.
+  - On page load the app restores the session from the httpOnly refresh cookie.
+  - An Axios interceptor refreshes once on a `401` and retries the request. Concurrent
+    requests share that single refresh, because the server treats a replayed refresh token
+    as theft.
+- **Live updates:** each Socket.IO event marks only the affected cached queries as stale (that
+  date's slots, appointment lists, dashboard stats), and TanStack Query refetches whatever is on
+  screen. An open booking form notices within a second if its chosen slot was just taken by
+  someone else.
+
+Why TanStack Query rather than Redux, and the full list of frontend optimisations, are in
+[ENGINEERING_DECISIONS.md §6](ENGINEERING_DECISIONS.md#6-what-performance-optimisations-did-you-apply).
 
 ---
 
@@ -166,7 +183,27 @@ emr-appointment-system/
 │   ├── Dockerfile
 │   ├── .env.example
 │   └── package.json
-├── frontend/                React SPA (in progress)
+├── frontend/
+│   ├── src/
+│   │   ├── api/             Axios client (token + refresh), one function per endpoint, query keys
+│   │   ├── components/
+│   │   │   ├── ui/          Button, Field/Input/Select, Modal/Drawer, DatePicker, Badge, Pagination, states
+│   │   │   └── layout/      AppLayout (sidebar, header), ProtectedRoute (role guard), navigation
+│   │   ├── context/         AuthContext (session), SocketContext (live updates → cache invalidation)
+│   │   ├── features/
+│   │   │   ├── auth/        Login
+│   │   │   ├── dashboard/   Today's stats and queue
+│   │   │   ├── scheduler/   Slot grid (memoised cells), filters, legend
+│   │   │   ├── booking/     Booking form, patient search, validation schema
+│   │   │   ├── appointments/ List, filters, detail drawer, status actions
+│   │   │   └── admin/       Staff and departments, doctor schedule editor
+│   │   ├── hooks/           useScheduleRoom, useSearchParamsState, useDebouncedValue, reference data
+│   │   ├── lib/             constants, date/time helpers, API error helpers
+│   │   ├── App.jsx          routes (lazy-loaded pages)
+│   │   └── main.jsx         providers (Query, Auth, Socket, toasts)
+│   ├── vite.config.js       dev proxy to the API, vendor chunking
+│   ├── .env.example
+│   └── package.json
 ├── docs/
 │   ├── API.md               API reference
 │   └── DATABASE.md          schema, ER diagram, indexes, sample documents
@@ -275,6 +312,15 @@ Generate secrets with:
 node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```
 
+**Frontend** (`frontend/.env`, optional; copy from
+[`frontend/.env.example`](frontend/.env.example)):
+
+| Variable | Default | Description |
+|---|---|---|
+| `VITE_DEV_API_TARGET` | `http://localhost:5000` | Where the Vite dev server proxies `/api` and `/socket.io`. Development only. |
+| `VITE_API_URL` | *(empty: same origin)* | API origin for a production build hosted separately from the API. Add that origin to the backend's `CORS_ORIGINS`, and use `COOKIE_SAME_SITE=none` over HTTPS. |
+| `VITE_CLINIC_TIMEZONE` | `Asia/Kolkata` | Must match the backend `CLINIC_TIMEZONE`, so "today" means the same day on both sides. |
+
 ---
 
 ## Installation
@@ -287,12 +333,18 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 
 ```bash
 git clone https://github.com/umangsingh24/emr-appointment-system.git
-cd emr-appointment-system/backend
+cd emr-appointment-system
+
+cd backend
 npm install
 cp .env.example .env
+
+cd ../frontend
+npm install
 ```
 
-Then edit `.env`: set both JWT secrets, and set `MONGO_URI` if you use Atlas.
+Then edit `backend/.env`: set both JWT secrets, and set `MONGO_URI` if you use Atlas. The
+frontend needs no `.env` for local development.
 
 ---
 
@@ -312,6 +364,19 @@ npm run dev       # http://localhost:5000, restarts on file changes
 ### Option B: MongoDB Atlas
 
 Put the Atlas connection string in `MONGO_URI`, then run `npm run seed` and `npm run dev`.
+
+### Then start the frontend
+
+In a second terminal:
+
+```bash
+cd frontend
+npm run dev       # http://localhost:5173
+```
+
+Open http://localhost:5173 and sign in with a seeded account. In development, Vite proxies
+`/api` and `/socket.io` to the API on port 5000. The browser therefore talks to a single
+origin, so the httpOnly refresh cookie works with no CORS setup.
 
 ### Option C: everything in Docker
 
@@ -351,6 +416,15 @@ Each doctor works 09:00–12:00 and 13:00–17:00, with a tea break from 10:30 t
 | `npm test` | Run the test suite. |
 | `npm run lint` | ESLint. |
 
+### Scripts (`frontend/`)
+
+| Script | Purpose |
+|---|---|
+| `npm run dev` | Vite dev server with hot reload and the API proxy. |
+| `npm run build` | Production build into `frontend/dist` (each page is its own lazy-loaded chunk). |
+| `npm run preview` | Serve the production build locally. |
+| `npm run lint` | ESLint, including React Hooks rules. |
+
 ### Quick check
 
 ```bash
@@ -372,7 +446,8 @@ npm test
 
 The suite starts an **in-memory MongoDB replica set** (via `mongodb-memory-server`), so it needs
 no external database, and transactions and unique-index races behave as in production. The
-first run downloads a MongoDB binary (~100 MB).
+first run downloads a MongoDB binary (several hundred MB), which is then cached in
+`backend/node_modules/.cache`.
 
 | File | Covers |
 |---|---|
@@ -380,6 +455,31 @@ first run downloads a MongoDB binary (~100 MB).
 | `auth.test.js` | Login, generic errors, validation, protected routes, refresh rotation, reuse detection, logout invalidation, RBAC on user creation. |
 | `appointments.test.js` | Slot grid, booking for new and existing patients, past/break/misaligned rejection, **10 concurrent bookings → exactly one succeeds**, cancel frees the slot, status workflow, doctor data isolation, field-level permissions, pagination/search/filter. |
 | `realtime.test.js` | Socket handshake auth, PHI-free live event delivery, doctors cannot subscribe to other doctors. |
+
+### Frontend verification
+
+The frontend has no automated tests yet (see Known limitations). It was verified manually in a
+browser against the real API and seeded data:
+
+- **Receptionist:**
+  - Logs in. A page reload keeps the session.
+  - The scheduler grid omits break slots.
+  - The booking form is prefilled from a clicked slot, and validation messages appear on the
+    empty form.
+  - Patient search works by name.
+  - Another user booking the same slot meanwhile clears it from the open form with a message.
+  - Booking with another slot succeeds.
+  - The detail drawer opens. "Mark arrived" is disabled for a future date.
+  - Cancelling frees the slot, and check-in updates the dashboard counts live.
+- **Doctor:**
+  - Sees only their own queue and appointments, with no booking or admin links.
+  - Admin URLs show an access-denied page.
+  - Writes consultation notes and completes the visit (Scheduled → Arrived → Completed).
+- **Super Admin:**
+  - The schedule editor loads an existing schedule and rejects an end time before its start.
+  - Adding a Friday session and saving immediately changes the slots the API returns.
+  - Creating a doctor account works.
+- **Responsive:** no page scrolls horizontally at 375 px width.
 
 ---
 
@@ -431,7 +531,19 @@ first run downloads a MongoDB binary (~100 MB).
   fix at scale.
 - **Access token remains valid until expiry after logout** (at most 15 minutes), as is
   standard for stateless JWTs.
-- **Frontend in progress.**
+- **No automated frontend tests.** The UI was verified by hand (see Testing). Component tests
+  for the refresh interceptor and the booking form, plus Playwright end-to-end tests, are the
+  next step.
+- **Two browser tabs refreshing at the same instant can sign the user out.** Refresh tokens
+  rotate, and a replayed token revokes the session (theft detection). Requests within one tab
+  share a single refresh, but separate tabs don't coordinate. A short grace window on the
+  server, or a cross-tab lock (`BroadcastChannel`), would remove this.
+- **Validation rules are declared twice.** The frontend and backend both use Zod 4 with the
+  same rules, but as separate schemas. A shared `packages/schemas` workspace would remove the
+  duplication.
+- **Socket reconnects keep the original handshake token.** The server checks the token only at
+  handshake. After a long disconnect with an expired token, the client refreshes and
+  reconnects automatically; a connection that stays up is not re-checked.
 
 ---
 

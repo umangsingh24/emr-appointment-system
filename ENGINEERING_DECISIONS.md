@@ -199,7 +199,7 @@ deploy step, so a large index build never blocks application start-up.
 | Measure | Detail |
 |---|---|
 | Password hashing | bcrypt, cost 12 (configurable). Passwords limited to 72 characters, bcrypt's input limit, so long inputs are not silently truncated. |
-| Short-lived access token | 15-minute JWT (HS256, issuer-checked, algorithm pinned to prevent `alg` confusion), sent as a Bearer header. Designed to be held in memory by the client, not in `localStorage`, so XSS cannot steal a long-lived credential. |
+| Short-lived access token | 15-minute JWT (HS256, issuer-checked, algorithm pinned to prevent `alg` confusion), sent as a Bearer header. The React client keeps it in memory only (never `localStorage`), so XSS cannot steal a long-lived credential. |
 | Refresh token in an httpOnly cookie | Not readable by JavaScript; `Secure` in production; `SameSite` configurable; `Path=/api/v1/auth`, so it is not sent with ordinary API calls. |
 | Refresh tokens stored hashed | Only SHA-256 hashes are in the database; a DB leak yields no usable tokens. |
 | Rotation and reuse detection | Each refresh revokes the old token atomically and issues a new one in the same *family*. Presenting a rotated token again is treated as theft: **the whole family is revoked** and the event is audited (`TOKEN_REUSE_DETECTED`). |
@@ -271,7 +271,7 @@ writes run after the business write commits and never fail the request.
 | `.lean()` on reads | Skips Mongoose document hydration, which noticeably cuts CPU and memory per request. |
 | Slots computed, not stored | No slot collection to read, write or keep consistent; generating a day's grid is microseconds of integer maths. |
 | Fire-and-forget audit writes | Auditing never adds latency to the user's request. |
-| Targeted Socket.IO rooms | Updates go only to clients viewing the affected doctor or department and day, not to every connected client. |
+| Targeted Socket.IO rooms | Doctors receive only events for their own appointments, and scheduler screens subscribe per doctor/department and day. Front-desk users also share one staff room so list screens stay current, which is acceptable because the payloads are tiny; at scale that room would be split per department. |
 | Small, PHI-free socket payloads | Cheap to fan out; clients refetch only the query they display. |
 | gzip `compression` | JSON lists compress well, often by around 80%. |
 | TTL index on refresh tokens | MongoDB cleans up expired tokens itself; no cron job is needed. |
@@ -279,11 +279,28 @@ writes run after the business write commits and never fail the request.
 
 ### Frontend
 
-The frontend is in progress. Planned optimisations: TanStack Query caching and request
-de-duplication, socket events that mark only the affected query as stale, `React.memo` on slot
-cells so a live update re-renders only the changed slot, debounced search inputs,
-route-level code splitting, and filters kept in the URL. This section will document what was
-actually implemented and measured.
+**State management choice: TanStack Query plus a small Context, not Redux.** Almost every piece
+of state here is a copy of server data (slots, appointments, doctors, stats). TanStack Query is
+built for exactly that. It gives caching, request de-duplication, loading and error states,
+retries, background refetching and targeted invalidation. Re-implementing those in Redux would
+mean slices, thunks and hand-written cache keys for no gain. The only client-owned global
+state is the login session, which is a few lines of React Context. Filter state lives in the
+URL.
+
+| Optimisation | Why it was necessary |
+|---|---|
+| **Targeted cache invalidation from socket events** | An event carries `{ date, doctorId, status }`, so the client invalidates only that date's slot queries plus the appointment and stat queries. TanStack Query then refetches only the queries currently on screen; nothing is refetched for screens that aren't open. |
+| **Memoised slot cells** (`React.memo` with primitive props and stable `useCallback` handlers) | A busy scheduler shows several doctors with 20–30 slots each. When one slot changes, only that cell re-renders instead of the whole grid. |
+| **`placeholderData: keepPreviousData`** on lists and slot grids | Changing page or date keeps the old content visible (dimmed) until new data arrives, with no flash of empty state and no layout jump. |
+| **Debounced search** (300–350 ms) | Typing "anil" sends one request, not four. Patient search results are cached for 60 s. |
+| **Sensible `staleTime`** | 30 s for operational data (sockets push real changes), 5 min for reference data (departments, doctors). Opening a dropdown does not trigger a request. |
+| **No retries on 4xx** | Retrying a validation error, a 403 or a 404 never helps; only 5xx and network errors retry (twice). |
+| **Route-level code splitting** (`React.lazy`) | The login page downloads only what it needs. Each page is a separate chunk of 1–4 KB gzipped, and the calendar library (~21 KB gzipped) loads only with pages that use it. |
+| **Vendor chunking** | React (~96 KB gz), data libraries (~44 KB gz) and form libraries (~39 KB gz) are separate long-cacheable files, so an app-code deploy doesn't invalidate them. |
+| **Single in-flight token refresh** | Ten requests failing with 401 at once trigger one refresh, not ten. This is required for correctness too, since the server treats a replayed refresh token as theft. |
+| **Context values memoised** | `useMemo` on the auth context value stops every consumer re-rendering on unrelated parent renders. |
+| **Stable modal effects** | The modal keeps `onClose` in a ref, so typing inside a dialog never re-runs its focus logic. Without this, each keystroke re-ran it and stole focus from the input. |
+| **Filters in the URL** | Reloading, sharing or using back/forward restores the exact list view without extra state or requests. |
 
 ---
 
@@ -340,7 +357,7 @@ than by a single process. Growth would be handled in stages.
 
 | Decision | Reasoning |
 |---|---|
-| **Zod** for validation | One schema both validates and produces typed, coerced, stripped data. Clear error paths (`body.weeklySchedule.0.sessions.1`). The same library can be shared with the React forms. |
+| **Zod** for validation | One schema both validates and produces typed, coerced, stripped data. Clear error paths (`body.weeklySchedule.0.sessions.1`). The React forms use Zod 4 too (via React Hook Form), with the same rules re-declared on the client; see Known limitations in the README. |
 | **Pino** for logging | Structured JSON logs (ready for any log aggregator), very low overhead, built-in redaction. Pretty-printed in development. |
 | **Vitest + Supertest + mongodb-memory-server** | Tests run against a real MongoDB **replica set** in memory, so transactions and unique-index races behave exactly as in production, with no external dependency. |
 | **`DELETE /appointments/:id` = cancel** | Medical records should not be hard-deleted. DELETE keeps the REST shape the spec asks for while preserving history. |
