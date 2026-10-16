@@ -1,7 +1,7 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { CalendarOff, UserRound } from 'lucide-react';
+import { CalendarOff, Settings2, UserRound } from 'lucide-react';
 import { useCallback, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { slotApi } from '../../api/endpoints.js';
 import { queryKeys } from '../../api/queryKeys.js';
 import { Badge } from '../../components/ui/Badge.jsx';
@@ -19,7 +19,7 @@ import { formatDate, todayISO } from '../../lib/date.js';
 import { AppointmentDrawer } from '../appointments/AppointmentDrawer.jsx';
 import { SlotGrid, SlotLegend } from './SlotGrid.jsx';
 
-function DoctorSchedule({ entry, canBook, onBook, onOpen }) {
+function DoctorSchedule({ entry, canBook, canManageSchedule, onBook, onOpen }) {
   const { doctor, slots, slotDurationMinutes } = entry;
   const available = slots.filter((s) => s.status === SLOT_STATUS.AVAILABLE).length;
 
@@ -47,10 +47,24 @@ function DoctorSchedule({ entry, canBook, onBook, onOpen }) {
 
       {entry.isWorkingDay ? (
         <SlotGrid doctorId={doctor._id} slots={slots} canBook={canBook} onBook={onBook} onOpen={onOpen} />
+      ) : slotDurationMinutes ? (
+        <p className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-500">Not working on this day.</p>
       ) : (
-        <p className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-500">
-          {slotDurationMinutes ? 'Not working on this day.' : 'No schedule configured yet.'}
-        </p>
+        // No schedule at all: slots are generated from working hours, so there is nothing to book yet.
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-amber-50 px-4 py-3 ring-1 ring-amber-200">
+          <p className="text-sm text-amber-900">
+            No working hours set yet, so this doctor has no bookable slots.
+            {!canManageSchedule && ' Ask a Super Admin to set up the schedule.'}
+          </p>
+          {canManageSchedule && (
+            <Link
+              to={`/admin/schedules?doctor=${doctor._id}`}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-amber-900 ring-1 ring-amber-300 hover:bg-amber-100"
+            >
+              <Settings2 className="size-3.5" aria-hidden="true" /> Set schedule
+            </Link>
+          )}
+        </div>
       )}
     </Card>
   );
@@ -163,7 +177,14 @@ export default function SchedulerPage() {
       ) : (
         <div className={slots.isPlaceholderData ? 'space-y-4 opacity-60 transition-opacity' : 'space-y-4'}>
           {slots.data.map((entry) => (
-            <DoctorSchedule key={entry.doctor._id} entry={entry} canBook={canBook} onBook={onBook} onOpen={onOpen} />
+            <DoctorSchedule
+              key={entry.doctor._id}
+              entry={entry}
+              canBook={canBook}
+              canManageSchedule={user.role === ROLES.SUPER_ADMIN}
+              onBook={onBook}
+              onOpen={onOpen}
+            />
           ))}
         </div>
       )}

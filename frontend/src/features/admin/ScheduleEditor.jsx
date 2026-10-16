@@ -111,6 +111,9 @@ export function ScheduleEditor({ doctor, schedule }) {
     defaultValues: toFormValues(schedule),
   });
   const { errors, isDirty } = formState;
+  // A doctor without a saved schedule starts from a suggested template, which must be savable as-is.
+  const isNew = !schedule;
+  const canSave = isDirty || isNew;
 
   const save = useMutation({
     mutationFn: (values) => doctorApi.saveSchedule(doctor._id, toPayload(values)),
@@ -151,11 +154,18 @@ export function ScheduleEditor({ doctor, schedule }) {
           <Button variant="ghost" disabled={!isDirty} onClick={() => reset()}>
             Discard
           </Button>
-          <Button type="submit" loading={save.isPending} disabled={!isDirty}>
+          <Button type="submit" loading={save.isPending} disabled={!canSave}>
             Save schedule
           </Button>
         </div>
       </Card>
+
+      {isNew && (
+        <div className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
+          {doctor.name} has no schedule yet, so no slots can be booked. A suggested Mon–Fri template is filled in below.
+          Adjust it if needed and click <strong>Save schedule</strong>.
+        </div>
+      )}
 
       {serverErrors.length > 0 && (
         <div role="alert" className="mb-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700 ring-1 ring-rose-200">
