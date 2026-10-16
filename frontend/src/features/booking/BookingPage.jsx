@@ -20,6 +20,16 @@ import { applyServerFieldErrors, getErrorCode, getErrorMessage } from '../../lib
 import { bookingSchema, toCreatePayload } from './bookingSchema.js';
 import { PatientSearch } from './PatientSearch.jsx';
 
+/** Tells the receptionist *why* a doctor has nothing to book, so they know whom to ask. */
+function describeNoSlots(day) {
+  if (!day) return undefined; // still loading
+  if (!day.slotDurationMinutes) {
+    return 'This doctor has no working hours set yet. A Super Admin can add them under Doctor schedules.';
+  }
+  if (!day.isWorkingDay) return 'The doctor does not work on this day.';
+  return 'No free slots left on this day.';
+}
+
 function ModeTab({ active, icon: Icon, children, ...props }) {
   return (
     <button
@@ -77,10 +87,14 @@ export default function BookingPage() {
   const slots = useQuery({
     queryKey: queryKeys.slots(slotParams),
     queryFn: () => slotApi.list(slotParams),
-    select: (response) => response.data[0]?.slots ?? [],
+    select: (response) => response.data[0], // { slots, slotDurationMinutes, isWorkingDay }
     enabled: Boolean(doctorId && date),
   });
-  const availableSlots = useMemo(() => (slots.data ?? []).filter((s) => s.status === SLOT_STATUS.AVAILABLE), [slots.data]);
+  const availableSlots = useMemo(
+    () => (slots.data?.slots ?? []).filter((s) => s.status === SLOT_STATUS.AVAILABLE),
+    [slots.data],
+  );
+  const noSlotsHint = doctorId && availableSlots.length === 0 ? describeNoSlots(slots.data) : undefined;
 
   // If the chosen slot stops being available (another user booked it, or the date changed), clear it.
   useEffect(() => {
@@ -190,7 +204,7 @@ export default function BookingPage() {
                 label="Time slot"
                 required
                 error={errors.slotStart?.message}
-                hint={doctorId && slots.data && availableSlots.length === 0 ? 'No free slots on this day.' : undefined}
+                hint={noSlotsHint}
               >
                 {(aria) => (
                   <Select

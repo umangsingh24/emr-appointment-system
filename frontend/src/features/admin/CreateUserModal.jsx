@@ -1,6 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm, useWatch } from 'react-hook-form';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { userApi } from '../../api/endpoints.js';
@@ -32,6 +33,7 @@ const EMPTY = { role: ROLES.DOCTOR, name: '', email: '', password: '', departmen
 
 export function CreateUserModal({ open, onClose }) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const departments = useDepartments();
   const { register, handleSubmit, control, reset, setError, formState } = useForm({
     resolver: zodResolver(schema),
@@ -54,9 +56,20 @@ export function CreateUserModal({ open, onClose }) {
     onSuccess: ({ data }) => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
       queryClient.invalidateQueries({ queryKey: ['doctors'] });
-      toast.success(`${data.name} can now sign in`);
+      queryClient.invalidateQueries({ queryKey: ['slots'] }); // department grids now include this doctor
       reset(EMPTY);
       onClose();
+
+      if (data.role !== ROLES.DOCTOR) {
+        toast.success(`${data.name} can now sign in`);
+        return;
+      }
+      // A doctor has no bookable slots until working hours are set, so make that the next step.
+      toast.success(`${data.name} can now sign in`, {
+        description: 'Set their working hours so patients can be booked.',
+        duration: 10_000,
+        action: { label: 'Set schedule', onClick: () => navigate(`/admin/schedules?doctor=${data._id}`) },
+      });
     },
     onError: (error) => {
       if (error?.response?.data?.meta?.code === 'EMAIL_TAKEN') setError('email', { message: getErrorMessage(error) });
